@@ -1,7 +1,9 @@
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
+import { SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { AgentProvider } from "@/lib/agent-store/provider"
 import { ChatsProvider } from "@/lib/chat-store/chats/provider"
 import { APP_DESCRIPTION, APP_NAME } from "@/lib/config"
@@ -10,6 +12,7 @@ import Script from "next/script"
 import { createClient } from "../lib/supabase/server"
 import { LayoutClient } from "./layout-client"
 import { ChatSessionProvider } from "./providers/chat-session-provider"
+import { UserPreferencesProvider } from "./providers/user-preferences-provider"
 import { UserProvider } from "./providers/user-provider"
 import { UserProfile } from "./types/user"
 
@@ -68,16 +71,22 @@ export default async function RootLayout({
         <UserProvider initialUser={userProfile}>
           <ChatsProvider userId={userProfile?.id}>
             <ChatSessionProvider>
-              <AgentProvider>
-                <ThemeProvider
-                  attribute="class"
-                  defaultTheme="light"
-                  enableSystem
-                  disableTransitionOnChange
-                >
-                  <Toaster position="top-center" />
-                  {children}
-                </ThemeProvider>
+              <AgentProvider userId={userProfile?.id}>
+                <UserPreferencesProvider userId={userProfile?.id}>
+                  <TooltipProvider delayDuration={200} skipDelayDuration={500}>
+                    <ThemeProvider
+                      attribute="class"
+                      defaultTheme="light"
+                      enableSystem
+                      disableTransitionOnChange
+                    >
+                      <SidebarProvider defaultOpen>
+                        <Toaster position="top-center" />
+                        {children}
+                      </SidebarProvider>
+                    </ThemeProvider>
+                  </TooltipProvider>
+                </UserPreferencesProvider>
               </AgentProvider>
             </ChatSessionProvider>
           </ChatsProvider>

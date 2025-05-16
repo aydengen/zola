@@ -1,5 +1,6 @@
 "use client"
 
+import { useAgentCommand } from "@/app/components/chat-input/use-agent-command"
 import {
   PromptInput,
   PromptInputAction,
@@ -7,12 +8,16 @@ import {
   PromptInputTextarea,
 } from "@/components/prompt-kit/prompt-input"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, Stop } from "@phosphor-icons/react"
-import React, { useCallback, useEffect, useRef } from "react"
+import { useAgent } from "@/lib/agent-store/provider"
+import { MODELS_OPTIONS } from "@/lib/config"
+import { ArrowUp, Stop, Warning } from "@phosphor-icons/react"
+import React, { useCallback, useEffect } from "react"
+import { PromptSystem } from "../suggestions/prompt-system"
+import { AgentCommand } from "./agent-command"
 import { ButtonFileUpload } from "./button-file-upload"
 import { FileList } from "./file-list"
-import { PromptSystem } from "./prompt-system"
 import { SelectModel } from "./select-model"
+import { SelectedAgent } from "./selected-agent"
 
 type ChatInputProps = {
   value: string
@@ -28,11 +33,8 @@ type ChatInputProps = {
   onSelectModel: (model: string) => void
   selectedModel: string
   isUserAuthenticated: boolean
-  onSelectSystemPrompt: (systemPrompt: string) => void
-  systemPrompt?: string
   stop: () => void
   status?: "submitted" | "streaming" | "ready" | "error"
-  placeholder?: string
 }
 
 export function ChatInput({
@@ -48,33 +50,26 @@ export function ChatInput({
   onSelectModel,
   selectedModel,
   isUserAuthenticated,
-  onSelectSystemPrompt,
   stop,
   status,
-  placeholder,
 }: ChatInputProps) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const { currentAgent, curatedAgents, userAgents } = useAgent()
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (isSubmitting) {
-        e.preventDefault()
-        return
-      }
+  const agentCommand = useAgentCommand({
+    value,
+    onValueChange,
+    agents: [...(curatedAgents || []), ...(userAgents || [])],
+    defaultAgent: currentAgent,
+  })
 
-      if (e.key === "Enter" && status === "streaming") {
-        e.preventDefault()
-        return
-      }
-
-      if (e.key === "Enter" && !e.shiftKey) {
-        onSend()
-      }
-    },
-    [onSend, isSubmitting]
+  const selectModelConfig = MODELS_OPTIONS.find(
+    (model) => model.id === selectedModel
+  )
+  const noToolSupport = selectModelConfig?.features?.some(
+    (feature) => feature.id === "tool-use" && !feature.enabled
   )
 
-  const handleMainClick = () => {
+  const handleSend = useCallback(() => {
     if (isSubmitting) {
       return
     }
@@ -85,53 +80,82 @@ export function ChatInput({
     }
 
     onSend()
-  }
+  }, [isSubmitting, onSend, status, stop])
 
-  const handlePaste = useCallback(
-    async (e: ClipboardEvent) => {
-      if (!isUserAuthenticated) {
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // First process agent command related key handling
+      agentCommand.handleKeyDown(e)
+
+      if (isSubmitting) {
         e.preventDefault()
         return
       }
 
+      if (e.key === "Enter" && status === "streaming") {
+        e.preventDefault()
+        return
+      }
+
+      if (e.key === "Enter" && !e.shiftKey && !agentCommand.showAgentCommand) {
+        e.preventDefault()
+        onSend()
+      }
+    },
+    [agentCommand, isSubmitting, onSend, status]
+  )
+
+  const handlePaste = useCallback(
+    async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items
       if (!items) return
 
-      const imageFiles: File[] = []
+      const hasImageContent = Array.from(items).some((item) =>
+        item.type.startsWith("image/")
+      )
 
-      for (const item of Array.from(items)) {
-        if (item.type.startsWith("image/")) {
-          const file = item.getAsFile()
-          if (file) {
-            const newFile = new File(
-              [file],
-              `pasted-image-${Date.now()}.${file.type.split("/")[1]}`,
-              { type: file.type }
-            )
-            imageFiles.push(newFile)
+      if (!isUserAuthenticated && hasImageContent) {
+        e.preventDefault()
+        return
+      }
+
+      if (isUserAuthenticated && hasImageContent) {
+        const imageFiles: File[] = []
+
+        for (const item of Array.from(items)) {
+          if (item.type.startsWith("image/")) {
+            const file = item.getAsFile()
+            if (file) {
+              const newFile = new File(
+                [file],
+                `pasted-image-${Date.now()}.${file.type.split("/")[1]}`,
+                { type: file.type }
+              )
+              imageFiles.push(newFile)
+            }
           }
         }
-      }
 
-      if (imageFiles.length > 0) {
-        onFileUpload(imageFiles)
+        if (imageFiles.length > 0) {
+          onFileUpload(imageFiles)
+        }
       }
+      // Text pasting will work by default for everyone
     },
     [isUserAuthenticated, onFileUpload]
   )
 
   useEffect(() => {
-    const el = textareaRef.current
+    const el = agentCommand.textareaRef.current
     if (!el) return
     el.addEventListener("paste", handlePaste)
     return () => el.removeEventListener("paste", handlePaste)
-  }, [handlePaste])
+  }, [agentCommand.textareaRef, handlePaste])
 
   return (
     <div className="relative flex w-full flex-col gap-4">
       {hasSuggestions && (
         <PromptSystem
-          onSelectSystemPrompt={onSelectSystemPrompt}
           onValueChange={onValueChange}
           onSuggestion={onSuggestion}
           value={value}
@@ -139,19 +163,37 @@ export function ChatInput({
       )}
       <div className="relative order-2 px-2 pb-3 sm:pb-4 md:order-1">
         <PromptInput
-          className="border-input bg-popover relative z-10 overflow-hidden border p-0 pb-2 shadow-xs backdrop-blur-xl"
+          className="bg-popover relative z-10 p-0 pt-1 shadow-xs backdrop-blur-xl"
           maxHeight={200}
           value={value}
-          onValueChange={onValueChange}
+          onValueChange={agentCommand.handleValueChange}
         >
+          {agentCommand.showAgentCommand && (
+            <div className="absolute bottom-full left-0 w-full">
+              <AgentCommand
+                isOpen={agentCommand.showAgentCommand}
+                searchTerm={agentCommand.agentSearchTerm}
+                onSelect={agentCommand.handleAgentSelect}
+                onClose={agentCommand.closeAgentCommand}
+                activeIndex={agentCommand.activeAgentIndex}
+                onActiveIndexChange={agentCommand.setActiveAgentIndex}
+                curatedAgents={curatedAgents || []}
+                userAgents={userAgents || []}
+              />
+            </div>
+          )}
+          <SelectedAgent
+            selectedAgent={agentCommand.selectedAgent}
+            removeSelectedAgent={agentCommand.removeSelectedAgent}
+          />
           <FileList files={files} onFileRemove={onFileRemove} />
           <PromptInputTextarea
-            placeholder={placeholder}
+            placeholder={"Ask Zola or @mention an agent"}
             onKeyDown={handleKeyDown}
-            className="mt-2 ml-2 min-h-[44px] text-base leading-[1.3] sm:text-base md:text-base"
-            ref={textareaRef}
+            className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
+            ref={agentCommand.textareaRef}
           />
-          <PromptInputActions className="mt-5 w-full justify-between px-2">
+          <PromptInputActions className="mt-5 w-full justify-between px-3 pb-3">
             <div className="flex gap-2">
               <ButtonFileUpload
                 onFileUpload={onFileUpload}
@@ -163,6 +205,15 @@ export function ChatInput({
                 onSelectModel={onSelectModel}
                 isUserAuthenticated={isUserAuthenticated}
               />
+              {currentAgent && noToolSupport && (
+                <div className="flex items-center gap-1">
+                  <Warning className="size-4" />
+                  <p className="line-clamp-2 text-xs">
+                    {selectedModel} does not support tools. Agents may not work
+                    as expected.
+                  </p>
+                </div>
+              )}
             </div>
             <PromptInputAction
               tooltip={status === "streaming" ? "Stop" : "Send"}
@@ -172,7 +223,7 @@ export function ChatInput({
                 className="size-9 rounded-full transition-all duration-300 ease-out"
                 disabled={!value || isSubmitting}
                 type="button"
-                onClick={handleMainClick}
+                onClick={handleSend}
                 aria-label={status === "streaming" ? "Stop" : "Send message"}
               >
                 {status === "streaming" ? (

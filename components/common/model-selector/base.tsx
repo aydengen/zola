@@ -243,13 +243,13 @@ export function ModelSelector({
             forceMount
             side="top"
           >
-            <div className="bg-background sticky top-0 z-10 border-b px-0 pt-0 pb-0">
+            <div className="bg-background sticky top-0 z-10 rounded-t-md border-b px-0 pt-0 pb-0">
               <div className="relative">
                 <MagnifyingGlass className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
                 <Input
                   ref={searchInputRef}
                   placeholder="Search models..."
-                  className="border border-none pl-8 shadow-none focus-visible:ring-0"
+                  className="dark:bg-popover rounded-b-none border border-none pl-8 shadow-none focus-visible:ring-0"
                   value={searchQuery}
                   onChange={handleSearchChange}
                   onClick={(e) => e.stopPropagation()}
