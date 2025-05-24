@@ -2,10 +2,11 @@
 
 import { ChatInput } from "@/app/components/chat-input/chat-input"
 import { Conversation } from "@/app/components/chat/conversation"
+import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { useChatSession } from "@/app/providers/chat-session-provider"
 import { useUser } from "@/app/providers/user-provider"
 import { toast } from "@/components/ui/toast"
-import { useAgent } from "@/lib/agent-store/hooks"
+import { useAgent } from "@/lib/agent-store/provider"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import { useMessages } from "@/lib/chat-store/messages/provider"
@@ -21,7 +22,7 @@ import { useChat } from "@ai-sdk/react"
 import { AnimatePresence, motion } from "motion/react"
 import dynamic from "next/dynamic"
 import { redirect, useSearchParams } from "next/navigation"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { useChatHandlers } from "./use-chat-handlers"
 import { useChatUtils } from "./use-chat-utils"
 import { useFileUpload } from "./use-file-upload"
@@ -35,6 +36,24 @@ const DialogAuth = dynamic(
   () => import("./dialog-auth").then((mod) => mod.DialogAuth),
   { ssr: false }
 )
+
+// Create a separate component that uses useSearchParams
+function SearchParamsProvider({
+  setInput,
+}: {
+  setInput: (input: string) => void
+}) {
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const prompt = searchParams.get("prompt")
+    if (prompt) {
+      setInput(prompt)
+    }
+  }, [searchParams, setInput])
+
+  return null
+}
 
 export function Chat() {
   const { chatId } = useChatSession()
@@ -61,15 +80,17 @@ export function Chat() {
   const [selectedModel, setSelectedModel] = useState(
     currentChat?.model || user?.preferred_model || MODEL_DEFAULT
   )
-  const [systemPrompt, setSystemPrompt] = useState(
-    currentChat?.system_prompt || SYSTEM_PROMPT_DEFAULT
-  )
+  const { currentAgent } = useAgent()
+  const systemPrompt =
+    currentAgent?.system_prompt || user?.system_prompt || SYSTEM_PROMPT_DEFAULT
+
   const [hydrated, setHydrated] = useState(false)
-  const searchParams = useSearchParams()
   const hasSentFirstMessageRef = useRef(false)
-  const { isTooling, agent } = useAgent()
 
   const isAuthenticated = !!user?.id
+
+  const { draftValue, clearDraft } = useChatDraft(chatId)
+
   const {
     messages,
     input,
@@ -84,9 +105,13 @@ export function Chat() {
   } = useChat({
     api: API_ROUTE_CHAT,
     initialMessages,
+    initialInput: draftValue,
+    onFinish: async (message) => {
+      // store the assistant message in the cache
+      await cacheAndAddMessage(message)
+    },
   })
 
-  // Use the custom hook for chat utilities
   const { checkLimitsAndNotify, ensureChatExists } = useChatUtils({
     isAuthenticated,
     chatId,
@@ -94,28 +119,22 @@ export function Chat() {
     input,
     selectedModel,
     systemPrompt,
-    selectedAgentId: agent?.id || null,
+    selectedAgentId: currentAgent?.id || null,
     createNewChat,
     setHasDialogAuth,
   })
 
-  const {
-    handleInputChange,
-    handleSelectSystemPrompt,
-    handleModelChange,
-    handleDelete,
-    handleEdit,
-  } = useChatHandlers({
-    messages,
-    setMessages,
-    setInput,
-    setSystemPrompt,
-    setSelectedModel,
-    selectedModel,
-    chatId,
-    updateChatModel,
-    user,
-  })
+  const { handleInputChange, handleModelChange, handleDelete, handleEdit } =
+    useChatHandlers({
+      messages,
+      setMessages,
+      setInput,
+      setSelectedModel,
+      selectedModel,
+      chatId,
+      updateChatModel,
+      user,
+    })
 
   // when chatId is null, set messages to an empty array
   useEffect(() => {
@@ -123,12 +142,6 @@ export function Chat() {
       setMessages([])
     }
   }, [chatId])
-
-  useEffect(() => {
-    if (currentChat?.system_prompt) {
-      setSystemPrompt(currentChat?.system_prompt)
-    }
-  }, [currentChat])
 
   useEffect(() => {
     setHydrated(true)
@@ -150,13 +163,6 @@ export function Chat() {
       })
     }
   }, [error])
-
-  useEffect(() => {
-    const prompt = searchParams.get("prompt")
-    if (prompt) {
-      setInput(prompt)
-    }
-  }, [searchParams])
 
   const submit = async () => {
     setIsSubmitting(true)
@@ -228,7 +234,7 @@ export function Chat() {
         model: selectedModel,
         isAuthenticated,
         systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
-        ...(agent?.id && { agentId: agent.id }),
+        ...(currentAgent?.id && { agentId: currentAgent.id }),
       },
       experimental_attachments: attachments || undefined,
     }
@@ -238,7 +244,7 @@ export function Chat() {
       setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
       cleanupOptimisticAttachments(optimisticMessage.experimental_attachments)
       cacheAndAddMessage(optimisticMessage)
-
+      clearDraft()
       hasSentFirstMessageRef.current = true
     } catch (error) {
       setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
@@ -339,6 +345,12 @@ export function Chat() {
       )}
     >
       <DialogAuth open={hasDialogAuth} setOpen={setHasDialogAuth} />
+
+      {/* Add Suspense boundary for SearchParamsProvider */}
+      <Suspense>
+        <SearchParamsProvider setInput={setInput} />
+      </Suspense>
+
       <AnimatePresence initial={false} mode="popLayout">
         {!chatId && messages.length === 0 ? (
           <motion.div
@@ -393,15 +405,13 @@ export function Chat() {
           onFileRemove={handleFileRemove}
           hasSuggestions={!chatId && messages.length === 0}
           onSelectModel={handleModelChange}
-          onSelectSystemPrompt={handleSelectSystemPrompt}
           selectedModel={selectedModel}
           isUserAuthenticated={isAuthenticated}
-          systemPrompt={systemPrompt}
           stop={stop}
           status={status}
-          placeholder={"Ask Zola anything"}
         />
       </motion.div>
+
       <FeedbackWidget authUserId={user?.id} />
     </div>
   )

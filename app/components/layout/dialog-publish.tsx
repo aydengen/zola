@@ -28,15 +28,16 @@ import {
 } from "@/components/ui/tooltip"
 import { APP_DOMAIN } from "@/lib/config"
 import { createClient } from "@/lib/supabase/client"
+import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { Check, Copy, Globe, Spinner } from "@phosphor-icons/react"
 import type React from "react"
 import { useState } from "react"
 
-type DialogPublishProps = {
-  agent: AgentHeader
-}
+export function DialogPublish() {
+  if (!isSupabaseEnabled) {
+    return null
+  }
 
-export function DialogPublish({ agent }: DialogPublishProps) {
   const [openDialog, setOpenDialog] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const { chatId } = useChatSession()
@@ -66,6 +67,11 @@ export function DialogPublish({ agent }: DialogPublishProps) {
     setIsLoading(true)
 
     const supabase = createClient()
+
+    if (!supabase) {
+      throw new Error("Supabase is not configured")
+    }
+
     const { data, error } = await supabase
       .from("chats")
       .update({ public: true })
@@ -99,7 +105,7 @@ export function DialogPublish({ agent }: DialogPublishProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-1.5 transition-colors"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted bg-background rounded-full p-1.5 transition-colors"
             onClick={handlePublish}
             disabled={isLoading}
           >
@@ -124,16 +130,11 @@ export function DialogPublish({ agent }: DialogPublishProps) {
         <div className="grid gap-2">
           <div className="flex items-center gap-1">
             <div className="relative flex-1">
-              <Input
-                id="slug"
-                value={publicLink}
-                readOnly
-                className="flex-1 bg-gray-50"
-              />
+              <Input id="slug" value={publicLink} readOnly className="flex-1" />
               <Button
                 variant="outline"
                 onClick={copyLink}
-                className="bg-background absolute top-0 right-0 rounded-l-none"
+                className="bg-background hover:bg-background absolute top-0 right-0 rounded-l-none transition-colors"
               >
                 {copied ? (
                   <Check className="size-4" />
