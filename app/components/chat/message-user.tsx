@@ -17,7 +17,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Message as MessageType } from "@ai-sdk/react"
-import { Check, Copy, PencilSimple, Trash } from "@phosphor-icons/react"
+import { Check, Copy, Trash } from "@phosphor-icons/react"
+import Image from "next/image"
 import { useRef, useState } from "react"
 
 const getTextFromDataUrl = (dataUrl: string) => {
@@ -72,7 +73,7 @@ export function MessageUser({
   return (
     <MessageContainer
       className={cn(
-        "group flex w-full max-w-3xl flex-col items-end gap-2 px-6 pb-2",
+        "group flex w-full max-w-3xl flex-col items-end gap-0.5 px-6 pb-2",
         hasScrollAnchor && "min-h-scroll-anchor"
       )}
     >
@@ -91,11 +92,13 @@ export function MessageUser({
               }}
             >
               <MorphingDialogTrigger className="z-10">
-                <img
+                <Image
                   className="mb-1 w-40 rounded-md"
                   key={attachment.name}
                   src={attachment.url}
-                  alt={attachment.name}
+                  alt={attachment.name || "Attachment"}
+                  width={160}
+                  height={120}
                 />
               </MorphingDialogTrigger>
               <MorphingDialogContainer>
@@ -150,20 +153,30 @@ export function MessageUser({
       ) : (
         <MessageContent
           className="bg-accent relative max-w-[70%] rounded-3xl px-5 py-2.5"
-          markdown={false}
+          markdown={true}
           ref={contentRef}
+          components={{
+            code: ({ children }) => <>{children}</>,
+            pre: ({ children }) => <>{children}</>,
+            h1: ({ children }) => <p>{children}</p>,
+            h2: ({ children }) => <p>{children}</p>,
+            h3: ({ children }) => <p>{children}</p>,
+            h4: ({ children }) => <p>{children}</p>,
+            h5: ({ children }) => <p>{children}</p>,
+            h6: ({ children }) => <p>{children}</p>,
+            p: ({ children }) => <p>{children}</p>,
+            li: ({ children }) => <p>- {children}</p>,
+            ul: ({ children }) => <>{children}</>,
+            ol: ({ children }) => <>{children}</>,
+          }}
         >
           {children}
         </MessageContent>
       )}
-      <MessageActions className="flex gap-0 opacity-0 transition-opacity group-hover:opacity-100">
-        <MessageAction
-          tooltip={copied ? "Copied!" : "Copy text"}
-          side="bottom"
-          delayDuration={0}
-        >
+      <MessageActions className="flex gap-0 opacity-0 transition-opacity duration-0 group-hover:opacity-100">
+        <MessageAction tooltip={copied ? "Copied!" : "Copy text"} side="bottom">
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition"
+            className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
             aria-label="Copy text"
             onClick={copyToClipboard}
             type="button"
@@ -190,9 +203,9 @@ export function MessageUser({
             <PencilSimple className="size-4" />
           </button>
         </MessageAction> */}
-        <MessageAction tooltip="Delete" side="bottom" delayDuration={0}>
+        <MessageAction tooltip="Delete" side="bottom">
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition"
+            className="hover:bg-accent/60 text-muted-foreground hover:text-foreground flex size-7.5 items-center justify-center rounded-full bg-transparent transition"
             aria-label="Delete"
             onClick={handleDelete}
             type="button"

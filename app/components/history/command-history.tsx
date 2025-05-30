@@ -1,6 +1,5 @@
 "use client"
 
-import { useChatSession } from "@/app/providers/chat-session-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useChatSession } from "@/lib/chat-store/session/provider"
 import type { Chats } from "@/lib/chat-store/types"
 import { cn } from "@/lib/utils"
 import { Check, PencilSimple, TrashSimple, X } from "@phosphor-icons/react"
@@ -32,6 +32,7 @@ type CommandHistoryProps = {
   trigger: React.ReactNode
   isOpen: boolean
   setIsOpen: (open: boolean) => void
+  hasPopover?: boolean
 }
 
 type CommandItemEditProps = {
@@ -211,9 +212,9 @@ function CommandItemRow({
         <span
           className={cn(
             "text-muted-foreground text-sm font-normal opacity-100 transition-opacity duration-0",
-            "group-data-[selected=true]:opacity-0",
+            "group-data-[selected=true]:opacity-100",
             Boolean(editingId || deletingId) &&
-              "group-data-[selected=true]:opacity-100"
+              "group-data-[selected=true]:opacity-0"
           )}
         >
           {formatDate(chat?.created_at)}
@@ -273,6 +274,7 @@ export function CommandHistory({
   trigger,
   isOpen,
   setIsOpen,
+  hasPopover = true,
 }: CommandHistoryProps) {
   const { chatId } = useChatSession()
   const router = useRouter()
@@ -398,6 +400,9 @@ export function CommandHistory({
       )
     },
     [
+      chatId,
+      router,
+      setIsOpen,
       editingId,
       deletingId,
       editTitle,
@@ -435,10 +440,14 @@ export function CommandHistory({
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-        <TooltipContent>History ⌘+K</TooltipContent>
-      </Tooltip>
+      {hasPopover ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent>History ⌘+K</TooltipContent>
+        </Tooltip>
+      ) : (
+        trigger
+      )}
       <CommandDialog
         open={isOpen}
         onOpenChange={handleOpenChange}

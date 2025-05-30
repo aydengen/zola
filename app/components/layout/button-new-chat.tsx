@@ -16,9 +16,6 @@ export function ButtonNewChat() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      console.log("Key pressed:", e.key, "Meta:", e.metaKey, "Alt:", e.altKey)
-
-      // Add keyboard shortcut for ⌘⇧U to create new chat
       if ((e.key === "u" || e.key === "U") && e.metaKey && e.shiftKey) {
         e.preventDefault()
         router.push("/")
@@ -38,8 +35,9 @@ export function ButtonNewChat() {
       <TooltipTrigger asChild>
         <Link
           href="/"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-full p-1.5 transition-colors"
+          className="text-muted-foreground hover:text-foreground hover:bg-muted bg-background rounded-full p-1.5 transition-colors"
           prefetch
+          aria-label="New Chat"
         >
           <NotePencil size={24} />
         </Link>

@@ -9,6 +9,7 @@ import {
   deleteChat as deleteChatFromDb,
   fetchAndCacheChats,
   getCachedChats,
+  updateChatAgent as updateChatAgentFromDb,
   updateChatModel as updateChatModelFromDb,
   updateChatTitle,
 } from "./api"
@@ -35,6 +36,12 @@ interface ChatsContextType {
   resetChats: () => Promise<void>
   getChatById: (id: string) => Chats | undefined
   updateChatModel: (id: string, model: string) => Promise<void>
+  updateChatAgent: (
+    userId: string,
+    chatId: string,
+    agentId: string | null,
+    isAuthenticated: boolean
+  ) => Promise<void>
 }
 const ChatsContext = createContext<ChatsContextType | null>(null)
 
@@ -85,7 +92,7 @@ export function ChatsProvider({
     setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)))
     try {
       await updateChatTitle(id, title)
-    } catch (e) {
+    } catch {
       setChats(prev)
       toast({ title: "Failed to update title", status: "error" })
     }
@@ -102,7 +109,7 @@ export function ChatsProvider({
     try {
       await deleteChatFromDb(id)
       if (id === currentChatId && redirect) redirect()
-    } catch (e) {
+    } catch {
       setChats(prev)
       toast({ title: "Failed to delete chat", status: "error" })
     }
@@ -127,6 +134,8 @@ export function ChatsProvider({
       model: model || MODEL_DEFAULT,
       system_prompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
       agent_id: agentId || null,
+      user_id: userId,
+      public: true,
     }
     setChats((prev) => [...prev, optimisticChat])
 
@@ -136,7 +145,6 @@ export function ChatsProvider({
         title,
         model,
         isAuthenticated,
-        systemPrompt,
         agentId
       )
       setChats((prev) =>
@@ -148,7 +156,7 @@ export function ChatsProvider({
           )
       )
       return newChat
-    } catch (e) {
+    } catch {
       setChats(prev)
       toast({ title: "Failed to create chat", status: "error" })
     }
@@ -167,6 +175,15 @@ export function ChatsProvider({
     await updateChatModelFromDb(id, model)
   }
 
+  const updateChatAgent = async (
+    userId: string,
+    chatId: string,
+    agentId: string | null,
+    isAuthenticated: boolean
+  ) => {
+    await updateChatAgentFromDb(userId, chatId, agentId, isAuthenticated)
+  }
+
   return (
     <ChatsContext.Provider
       value={{
@@ -179,6 +196,7 @@ export function ChatsProvider({
         resetChats,
         getChatById,
         updateChatModel,
+        updateChatAgent,
         isLoading,
       }}
     >
