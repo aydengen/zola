@@ -1,26 +1,36 @@
 import { AgentDetail } from "@/app/components/agents/agent-detail"
 import { LayoutApp } from "@/app/components/layout/layout-app"
 import { MessagesProvider } from "@/lib/chat-store/messages/provider"
+import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { createClient } from "@/lib/supabase/server"
+import { notFound } from "next/navigation"
 
 export default async function AgentIdPage({
   params,
 }: {
   params: Promise<{ agentSlug: string | string[] }>
 }) {
+  if (!isSupabaseEnabled) {
+    notFound()
+  }
+
   const { agentSlug: slugParts } = await params
   const agentSlug = Array.isArray(slugParts) ? slugParts.join("/") : slugParts
 
   const supabase = await createClient()
 
-  const { data: agent, error } = await supabase
+  if (!supabase) {
+    notFound()
+  }
+
+  const { data: agent, error: agentError } = await supabase
     .from("agents")
     .select("*")
     .eq("slug", agentSlug)
     .single()
 
-  if (error) {
-    throw new Error(error.message)
+  if (agentError) {
+    throw new Error(agentError.message)
   }
 
   const { data: agents, error: agentsError } = await supabase
@@ -47,7 +57,7 @@ export default async function AgentIdPage({
             randomAgents={agents || []}
             isFullPage
             system_prompt={agent.system_prompt}
-            tools={agent.tools || []}
+            tools={agent.tools}
             mcp_config={agent.mcp_config}
           />
         </div>
