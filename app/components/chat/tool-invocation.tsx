@@ -12,7 +12,7 @@ import {
   Wrench,
 } from "@phosphor-icons/react"
 import { AnimatePresence, motion } from "framer-motion"
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
 
 interface ToolInvocationProps {
   toolInvocations: ToolInvocationUIPart[]
@@ -76,7 +76,7 @@ export function ToolInvocation({
           <div className="flex flex-1 flex-row items-center gap-2 text-left text-base">
             <Nut className="text-muted-foreground size-4" />
             <span className="text-sm">Tools executed</span>
-            <div className="bg-secondary rounded-full px-1.5 py-0.5 font-mono text-xs text-slate-700">
+            <div className="bg-secondary text-secondary-foreground rounded-full px-1.5 py-0.5 font-mono text-xs">
               {uniqueToolIds.length}
             </div>
           </div>
@@ -207,9 +207,6 @@ function SingleToolCard({
   className?: string
 }) {
   const [isExpanded, setIsExpanded] = useState(defaultOpen)
-  const [parsedResult, setParsedResult] = useState<any>(null)
-  const [parseError, setParseError] = useState<string | null>(null)
-
   const { toolInvocation } = toolData
   const { state, toolName, toolCallId, args } = toolInvocation
   const isLoading = state === "call"
@@ -217,63 +214,36 @@ function SingleToolCard({
   const result = isCompleted ? toolInvocation.result : undefined
 
   // Parse the result JSON if available
-  useEffect(() => {
-    let didCancel = false
+  const { parsedResult, parseError } = useMemo(() => {
+    if (!isCompleted || !result) return { parsedResult: null, parseError: null }
 
-    if (isCompleted && result) {
-      // Handle array results (like search results)
-      if (Array.isArray(result)) {
-        if (!didCancel) {
-          setParsedResult(result)
-        }
-        return
-      }
+    try {
+      if (Array.isArray(result))
+        return { parsedResult: result, parseError: null }
 
-      // Handle object results with content property
       if (
         typeof result === "object" &&
         result !== null &&
         "content" in result
       ) {
-        try {
-          const content = result.content
-          const textContent = content.find(
-            (item: { type: string }) => item.type === "text"
-          )
+        const textContent = result.content?.find(
+          (item: { type: string }) => item.type === "text"
+        )
+        if (!textContent?.text) return { parsedResult: null, parseError: null }
 
-          if (textContent && textContent.text) {
-            try {
-              // Try to parse as JSON first
-              const parsed = JSON.parse(textContent.text)
-              if (!didCancel) {
-                setParsedResult(parsed)
-              }
-            } catch (e) {
-              // If not valid JSON, just use the text as is
-              if (!didCancel) {
-                setParsedResult(textContent.text)
-              }
-            }
-            if (!didCancel) {
-              setParseError(null)
-            }
+        try {
+          return {
+            parsedResult: JSON.parse(textContent.text),
+            parseError: null,
           }
-        } catch (error) {
-          if (!didCancel) {
-            setParseError("Failed to parse result")
-          }
-          console.error("Failed to parse result:", error)
-        }
-      } else {
-        // Handle direct object results
-        if (!didCancel) {
-          setParsedResult(result)
+        } catch {
+          return { parsedResult: textContent.text, parseError: null }
         }
       }
-    }
 
-    return () => {
-      didCancel = true
+      return { parsedResult: result, parseError: null }
+    } catch (e) {
+      return { parsedResult: null, parseError: "Failed to parse result" }
     }
   }, [isCompleted, result])
 
@@ -281,7 +251,7 @@ function SingleToolCard({
   const formattedArgs = args
     ? Object.entries(args).map(([key, value]) => (
         <div key={key} className="mb-1">
-          <span className="font-medium text-slate-600">{key}:</span>{" "}
+          <span className="text-muted-foreground font-medium">{key}:</span>{" "}
           <span className="font-mono">
             {typeof value === "object"
               ? value === null
@@ -312,30 +282,35 @@ function SingleToolCard({
       ) {
         return (
           <div className="space-y-3">
-            {parsedResult.map((item: any, index: number) => (
-              <div
-                key={index}
-                className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
-              >
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary group flex items-center gap-1 font-medium hover:underline"
+            {parsedResult.map(
+              (
+                item: { url: string; title: string; snippet?: string },
+                index: number
+              ) => (
+                <div
+                  key={index}
+                  className="border-border border-b pb-3 last:border-0 last:pb-0"
                 >
-                  {item.title}
-                  <Link className="h-3 w-3 opacity-70 transition-opacity group-hover:opacity-100" />
-                </a>
-                <div className="text-muted-foreground mt-1 font-mono text-xs">
-                  {item.url}
-                </div>
-                {item.snippet && (
-                  <div className="mt-1 line-clamp-2 text-sm">
-                    {item.snippet}
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary group flex items-center gap-1 font-medium hover:underline"
+                  >
+                    {item.title}
+                    <Link className="h-3 w-3 opacity-70 transition-opacity group-hover:opacity-100" />
+                  </a>
+                  <div className="text-muted-foreground mt-1 font-mono text-xs">
+                    {item.url}
                   </div>
-                )}
-              </div>
-            ))}
+                  {item.snippet && (
+                    <div className="mt-1 line-clamp-2 text-sm">
+                      {item.snippet}
+                    </div>
+                  )}
+                </div>
+              )
+            )}
           </div>
         )
       }
@@ -352,20 +327,23 @@ function SingleToolCard({
 
     // Handle object results
     if (typeof parsedResult === "object" && parsedResult !== null) {
+      const resultObj = parsedResult as Record<string, unknown>
+      const title = typeof resultObj.title === "string" ? resultObj.title : null
+      const htmlUrl =
+        typeof resultObj.html_url === "string" ? resultObj.html_url : null
+
       return (
         <div>
-          {parsedResult.title && (
-            <div className="mb-2 font-medium">{parsedResult.title}</div>
-          )}
-          {parsedResult.html_url && (
+          {title && <div className="mb-2 font-medium">{title}</div>}
+          {htmlUrl && (
             <div className="mb-2">
               <a
-                href={parsedResult.html_url}
+                href={htmlUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary flex items-center gap-1 hover:underline"
               >
-                <span className="font-mono">{parsedResult.html_url}</span>
+                <span className="font-mono">{htmlUrl}</span>
                 <Link className="h-3 w-3 opacity-70" />
               </a>
             </div>
@@ -415,7 +393,7 @@ function SingleToolCard({
                 transition={{ duration: 0.15 }}
                 key="loading"
               >
-                <div className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">
+                <div className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-400">
                   <Spinner className="mr-1 h-3 w-3 animate-spin" />
                   Running
                 </div>
@@ -428,7 +406,7 @@ function SingleToolCard({
                 transition={{ duration: 0.15 }}
                 key="completed"
               >
-                <div className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-1.5 py-0.5 text-xs text-green-700">
+                <div className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-1.5 py-0.5 text-xs text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400">
                   <CheckCircle className="mr-1 h-3 w-3" />
                   Completed
                 </div>
@@ -460,7 +438,7 @@ function SingleToolCard({
                   <div className="text-muted-foreground mb-1 text-xs font-medium">
                     Arguments
                   </div>
-                  <div className="rounded border bg-slate-50 p-2 text-sm">
+                  <div className="bg-background rounded border p-2 text-sm">
                     {formattedArgs}
                   </div>
                 </div>
@@ -472,7 +450,7 @@ function SingleToolCard({
                   <div className="text-muted-foreground mb-1 text-xs font-medium">
                     Result
                   </div>
-                  <div className="max-h-60 overflow-auto rounded border bg-slate-50 p-2 text-sm">
+                  <div className="bg-background max-h-60 overflow-auto rounded border p-2 text-sm">
                     {parseError ? (
                       <div className="text-red-500">{parseError}</div>
                     ) : (

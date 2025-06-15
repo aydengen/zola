@@ -3,7 +3,7 @@
 import { PromptSuggestion } from "@/components/prompt-kit/prompt-suggestion"
 import { TRANSITION_SUGGESTIONS } from "@/lib/motion"
 import { AnimatePresence, motion } from "motion/react"
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
+import React, { memo, useCallback, useMemo, useState } from "react"
 import { SUGGESTIONS as SUGGESTIONS_CONFIG } from "../../../lib/config"
 
 type SuggestionsProps = {
@@ -12,13 +12,18 @@ type SuggestionsProps = {
   value?: string
 }
 
+const MotionPromptSuggestion = motion.create(PromptSuggestion)
+
 export const Suggestions = memo(function Suggestions({
   onValueChange,
   onSuggestion,
   value,
 }: SuggestionsProps) {
-  const MotionPromptSuggestion = motion.create(PromptSuggestion)
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
+
+  if (!value && activeCategory !== null) {
+    setActiveCategory(null)
+  }
 
   const activeCategoryData = SUGGESTIONS_CONFIG.find(
     (group) => group.label === activeCategory
@@ -26,12 +31,6 @@ export const Suggestions = memo(function Suggestions({
 
   const showCategorySuggestions =
     activeCategoryData && activeCategoryData.items.length > 0
-
-  useEffect(() => {
-    if (!value) {
-      setActiveCategory(null)
-    }
-  }, [value])
 
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
@@ -57,11 +56,9 @@ export const Suggestions = memo(function Suggestions({
         className="flex w-full max-w-full flex-nowrap justify-start gap-2 overflow-x-auto px-2 md:mx-auto md:max-w-2xl md:flex-wrap md:justify-center md:pl-0"
         initial="initial"
         animate="animate"
-        exit="exit"
         variants={{
           initial: { opacity: 0, y: 10, filter: "blur(4px)" },
           animate: { opacity: 1, y: 0, filter: "blur(0px)" },
-          exit: { opacity: 0, y: -10, filter: "blur(4px)" },
         }}
         transition={TRANSITION_SUGGESTIONS}
         style={{
@@ -75,7 +72,6 @@ export const Suggestions = memo(function Suggestions({
             className="capitalize"
             initial="initial"
             animate="animate"
-            exit="exit"
             transition={{
               ...TRANSITION_SUGGESTIONS,
               delay: index * 0.02,
@@ -83,7 +79,6 @@ export const Suggestions = memo(function Suggestions({
             variants={{
               initial: { opacity: 0, scale: 0.8 },
               animate: { opacity: 1, scale: 1 },
-              exit: { opacity: 0, scale: 0.8 },
             }}
           >
             <suggestion.icon className="size-4" />
@@ -102,11 +97,14 @@ export const Suggestions = memo(function Suggestions({
         key={activeCategoryData?.label}
         initial="initial"
         animate="animate"
-        exit="exit"
         variants={{
           initial: { opacity: 0, y: 10, filter: "blur(4px)" },
           animate: { opacity: 1, y: 0, filter: "blur(0px)" },
-          exit: { opacity: 0, y: -10, filter: "blur(4px)" },
+          exit: {
+            opacity: 0,
+            y: -10,
+            filter: "blur(4px)",
+          },
         }}
         transition={TRANSITION_SUGGESTIONS}
       >
@@ -119,11 +117,9 @@ export const Suggestions = memo(function Suggestions({
             className="block h-full text-left"
             initial="initial"
             animate="animate"
-            exit="exit"
             variants={{
               initial: { opacity: 0, y: -10 },
               animate: { opacity: 1, y: 0 },
-              exit: { opacity: 0, y: 10 },
             }}
             transition={{
               ...TRANSITION_SUGGESTIONS,
@@ -135,11 +131,16 @@ export const Suggestions = memo(function Suggestions({
         ))}
       </motion.div>
     ),
-    [handleSuggestionClick]
+    [
+      handleSuggestionClick,
+      activeCategoryData?.highlight,
+      activeCategoryData?.items,
+      activeCategoryData?.label,
+    ]
   )
 
   return (
-    <AnimatePresence mode="popLayout">
+    <AnimatePresence mode="wait">
       {showCategorySuggestions ? suggestionsList : suggestionsGrid}
     </AnimatePresence>
   )

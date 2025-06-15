@@ -146,31 +146,31 @@ export type Database = {
         Row: {
           agent_id: string | null
           created_at: string | null
+          updated_at: string | null
           id: string
           model: string | null
           title: string | null
           user_id: string
-          system_prompt: string | null
           public: boolean
         }
         Insert: {
           agent_id?: string | null
           created_at?: string | null
+          updated_at?: string | null
           id?: string
           model?: string | null
           title?: string | null
           user_id: string
-          system_prompt?: string | null
           public?: boolean
         }
         Update: {
           agent_id?: string | null
           created_at?: string | null
+          updated_at?: string | null
           id?: string
           model?: string | null
           title?: string | null
           user_id?: string
-          system_prompt?: string | null
           public?: boolean
         }
         Relationships: [
@@ -199,7 +199,7 @@ export type Database = {
           id: number
           role: "system" | "user" | "assistant" | "data"
           parts: Json | null
-          tool_invocations: Json | null
+          user_id?: string | null
         }
         Insert: {
           experimental_attachments?: Attachment[]
@@ -209,7 +209,7 @@ export type Database = {
           id?: number
           role: "system" | "user" | "assistant" | "data"
           parts?: Json
-          tool_invocations?: Json | null
+          user_id?: string | null
         }
         Update: {
           experimental_attachments?: Attachment[]
@@ -219,9 +219,17 @@ export type Database = {
           id?: number
           role?: "system" | "user" | "assistant" | "data"
           parts?: Json
-          tool_invocations?: Json | null
+          user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "messages_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       users: {
         Row: {
@@ -239,6 +247,7 @@ export type Database = {
           last_active_at: string | null
           daily_pro_message_count: number | null
           daily_pro_reset: string | null
+          system_prompt: string | null
         }
         Insert: {
           anonymous?: boolean | null
@@ -255,6 +264,7 @@ export type Database = {
           last_active_at?: string | null
           daily_pro_message_count?: number | null
           daily_pro_reset?: string | null
+          system_prompt?: string | null
         }
         Update: {
           anonymous?: boolean | null
@@ -271,6 +281,7 @@ export type Database = {
           last_active_at?: string | null
           daily_pro_message_count?: number | null
           daily_pro_reset?: string | null
+          system_prompt?: string | null
         }
         Relationships: []
       }
@@ -303,6 +314,41 @@ export type Database = {
           },
         ]
       }
+      user_keys: {
+        Row: {
+          user_id: string
+          provider: string
+          encrypted_key: string
+          iv: string
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          user_id: string
+          provider: string
+          encrypted_key: string
+          iv: string
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          user_id?: string
+          provider?: string
+          encrypted_key?: string
+          iv?: string
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_keys_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -310,15 +356,7 @@ export type Database = {
     Functions: {
       [_ in never]: never
     }
-    Enums: {
-      orderstatus:
-        | "UNPAID"
-        | "PAID"
-        | "SHIPPED"
-        | "OUT"
-        | "CANCELLED"
-        | "PENDING"
-    }
+    Enums: Record<string, never>
     CompositeTypes: {
       [_ in never]: never
     }

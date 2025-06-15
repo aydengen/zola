@@ -1,13 +1,99 @@
+import { filterLocalAgentId } from "@/lib/agents/utils"
 import { readFromIndexedDB, writeToIndexedDB } from "@/lib/chat-store/persist"
 import type { Chat, Chats } from "@/lib/chat-store/types"
 import { createClient } from "@/lib/supabase/client"
-import { MODEL_DEFAULT, SYSTEM_PROMPT_DEFAULT } from "../../config"
+import { isSupabaseEnabled } from "@/lib/supabase/config"
+import { MODEL_DEFAULT } from "../../config"
 import { fetchClient } from "../../fetch"
 import {
   API_ROUTE_CREATE_CHAT,
-  API_ROUTE_CREATE_CHAT_WITH_AGENT,
+  API_ROUTE_UPDATE_CHAT_AGENT,
   API_ROUTE_UPDATE_CHAT_MODEL,
 } from "../../routes"
+
+export async function getChatsForUserInDb(userId: string): Promise<Chats[]> {
+  const supabase = createClient()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from("chats")
+    .select("*")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+
+  if (!data || error) {
+    console.error("Failed to fetch chats:", error)
+    return []
+  }
+
+  return data
+}
+
+export async function updateChatTitleInDb(id: string, title: string) {
+  const supabase = createClient()
+  if (!supabase) return
+
+  const { error } = await supabase
+    .from("chats")
+    .update({ title, updated_at: new Date().toISOString() })
+    .eq("id", id)
+  if (error) throw error
+}
+
+export async function deleteChatInDb(id: string) {
+  const supabase = createClient()
+  if (!supabase) return
+
+  const { error } = await supabase.from("chats").delete().eq("id", id)
+  if (error) throw error
+}
+
+export async function getAllUserChatsInDb(userId: string): Promise<Chats[]> {
+  const supabase = createClient()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from("chats")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+
+  if (!data || error) return []
+  return data
+}
+
+export async function createChatInDb(
+  userId: string,
+  title: string,
+  model: string,
+  systemPrompt: string
+): Promise<string | null> {
+  const supabase = createClient()
+  if (!supabase) return null
+
+  const { data, error } = await supabase
+    .from("chats")
+    .insert({ user_id: userId, title, model, system_prompt: systemPrompt })
+    .select("id")
+    .single()
+
+  if (error || !data?.id) return null
+  return data.id
+}
+
+export async function fetchAndCacheChats(userId: string): Promise<Chats[]> {
+  if (!isSupabaseEnabled) {
+    return await getCachedChats()
+  }
+
+  const data = await getChatsForUserInDb(userId)
+
+  if (data.length > 0) {
+    await writeToIndexedDB("chats", data)
+  }
+
+  return data
+}
 
 export async function getCachedChats(): Promise<Chats[]> {
   const all = await readFromIndexedDB<Chats>("chats")
@@ -16,32 +102,11 @@ export async function getCachedChats(): Promise<Chats[]> {
   )
 }
 
-export async function fetchAndCacheChats(userId: string): Promise<Chats[]> {
-  const supabase = createClient()
-
-  const { data, error } = await supabase
-    .from("chats")
-    .select("id, title, created_at, model, system_prompt, agent_id")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-
-  if (!data || error) {
-    console.error("Failed to fetch chats:", error)
-    return []
-  }
-
-  await writeToIndexedDB("chats", data)
-  return data
-}
-
 export async function updateChatTitle(
   id: string,
   title: string
 ): Promise<void> {
-  const supabase = createClient()
-  const { error } = await supabase.from("chats").update({ title }).eq("id", id)
-  if (error) throw error
-
+  await updateChatTitleInDb(id, title)
   const all = await getCachedChats()
   const updated = (all as Chats[]).map((c) =>
     c.id === id ? { ...c, title } : c
@@ -50,10 +115,7 @@ export async function updateChatTitle(
 }
 
 export async function deleteChat(id: string): Promise<void> {
-  const supabase = createClient()
-  const { error } = await supabase.from("chats").delete().eq("id", id)
-  if (error) throw error
-
+  await deleteChatInDb(id)
   const all = await getCachedChats()
   await writeToIndexedDB(
     "chats",
@@ -67,14 +129,8 @@ export async function getChat(chatId: string): Promise<Chat | null> {
 }
 
 export async function getUserChats(userId: string): Promise<Chat[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-
-  if (!data || error) return []
+  const data = await getAllUserChatsInDb(userId)
+  if (!data) return []
   await writeToIndexedDB("chats", data)
   return data
 }
@@ -85,18 +141,11 @@ export async function createChat(
   model: string,
   systemPrompt: string
 ): Promise<string> {
-  const supabase = createClient()
-
-  const { data, error } = await supabase
-    .from("chats")
-    .insert({ user_id: userId, title, model, system_prompt: systemPrompt })
-    .select("id")
-    .single()
-
-  if (error || !data?.id) throw error
+  const id = await createChatInDb(userId, title, model, systemPrompt)
+  const finalId = id ?? crypto.randomUUID()
 
   await writeToIndexedDB("chats", {
-    id: data.id,
+    id: finalId,
     title,
     model,
     user_id: userId,
@@ -104,7 +153,7 @@ export async function createChat(
     created_at: new Date().toISOString(),
   })
 
-  return data.id
+  return finalId
 }
 
 export async function updateChatModel(chatId: string, model: string) {
@@ -141,31 +190,28 @@ export async function createNewChat(
   title?: string,
   model?: string,
   isAuthenticated?: boolean,
-  systemPrompt?: string,
   agentId?: string
 ): Promise<Chats> {
   try {
-    const apiRoute = agentId
-      ? API_ROUTE_CREATE_CHAT_WITH_AGENT
-      : API_ROUTE_CREATE_CHAT
+    // Note: Local agent IDs are filtered out at the API level (create-chat route)
+    const payload: {
+      userId: string
+      title: string
+      model: string
+      isAuthenticated?: boolean
+      agentId?: string
+    } = {
+      userId,
+      title: title || (agentId ? `Conversation with agent` : "New Chat"),
+      model: model || MODEL_DEFAULT,
+      isAuthenticated,
+    }
 
-    const payload = agentId
-      ? {
-          userId,
-          agentId,
-          title: title || `Conversation with agent`,
-          model: model || MODEL_DEFAULT,
-          isAuthenticated,
-        }
-      : {
-          userId,
-          title,
-          model: model || MODEL_DEFAULT,
-          isAuthenticated,
-          systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
-        }
+    if (agentId) {
+      payload.agentId = agentId
+    }
 
-    const res = await fetchClient(apiRoute, {
+    const res = await fetchClient(API_ROUTE_CREATE_CHAT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -182,14 +228,58 @@ export async function createNewChat(
       title: responseData.chat.title,
       created_at: responseData.chat.created_at,
       model: responseData.chat.model,
-      system_prompt: responseData.chat.system_prompt,
       agent_id: responseData.chat.agent_id,
+      user_id: responseData.chat.user_id,
+      public: responseData.chat.public,
+      updated_at: responseData.chat.updated_at,
     }
 
     await writeToIndexedDB("chats", chat)
     return chat
   } catch (error) {
     console.error("Error creating new chat:", error)
+    throw error
+  }
+}
+
+export async function updateChatAgent(
+  userId: string,
+  chatId: string,
+  agentId: string | null,
+  isAuthenticated: boolean
+) {
+  try {
+    // Filter out local agent IDs for database operations
+    const dbAgentId = filterLocalAgentId(agentId)
+
+    const res = await fetchClient(API_ROUTE_UPDATE_CHAT_AGENT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        chatId,
+        agentId: dbAgentId,
+        isAuthenticated,
+      }),
+    })
+    const responseData = await res.json()
+
+    if (!res.ok) {
+      throw new Error(
+        responseData.error ||
+          `Failed to update chat agent: ${res.status} ${res.statusText}`
+      )
+    }
+
+    const all = await getCachedChats()
+    const updated = (all as Chats[]).map((c) =>
+      c.id === chatId ? { ...c, agent_id: dbAgentId } : c
+    )
+    await writeToIndexedDB("chats", updated)
+
+    return responseData
+  } catch (error) {
+    console.error("Error updating chat agent:", error)
     throw error
   }
 }

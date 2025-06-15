@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/dialog"
 import { signInWithGoogle } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
+import { isSupabaseEnabled } from "@/lib/supabase/config"
+
 import { useState } from "react"
 
 type DialogAuthProps = {
@@ -22,7 +24,15 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  if (!isSupabaseEnabled) {
+    return null
+  }
+
   const supabase = createClient()
+
+  if (!supabase) {
+    return null
+  }
 
   const handleSignInWithGoogle = async () => {
     try {
@@ -35,9 +45,12 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
       if (data?.url) {
         window.location.href = data.url
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error signing in with Google:", err)
-      setError(err.message || "An unexpected error occurred. Please try again.")
+      setError(
+        (err as Error).message ||
+          "An unexpected error occurred. Please try again."
+      )
     } finally {
       setIsLoading(false)
     }
@@ -48,7 +61,7 @@ export function DialogAuth({ open, setOpen }: DialogAuthProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-xl">
-            You've reached the limit for today
+            You&apos;ve reached the limit for today
           </DialogTitle>
           <DialogDescription className="pt-2 text-base">
             Sign in below to increase your message limits.

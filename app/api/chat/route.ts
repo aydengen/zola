@@ -1,14 +1,22 @@
 import { loadAgent } from "@/lib/agents/load-agent"
-import { checkSpecialAgentUsage, incrementSpecialAgentUsage } from "@/lib/api"
-import { MODELS_OPTIONS, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
+import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { loadMCPToolsFromURL } from "@/lib/mcp/load-mcp-from-url"
-import { sanitizeUserInput } from "@/lib/sanitize"
-import { validateUserIdentity } from "@/lib/server/api"
-import { checkUsageByModel, incrementUsageByModel } from "@/lib/usage"
+import { getAllModels } from "@/lib/models"
+import { getProviderForModel } from "@/lib/openproviders/provider-map"
+import type { ProviderWithoutOllama } from "@/lib/user-keys"
 import { Attachment } from "@ai-sdk/ui-utils"
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
-import { LanguageModelV1, Message as MessageAISDK, streamText } from "ai"
-import { saveFinalAssistantMessage } from "./db"
+import { Message as MessageAISDK, streamText, ToolSet } from "ai"
+import {
+  logUserMessage,
+  storeAssistantMessage,
+  trackSpecialAgentUsage,
+  validateAndTrackUsage,
+} from "./api"
+import {
+  cleanMessagesForTools,
+  createErrorResponse,
+  extractErrorMessage,
+} from "./utils"
 
 export const maxDuration = 60
 
@@ -19,7 +27,8 @@ type ChatRequest = {
   model: string
   isAuthenticated: boolean
   systemPrompt: string
-  agentId?: string
+  agentId: string | null
+  enableSearch: boolean
 }
 
 export async function POST(req: Request) {
@@ -32,6 +41,7 @@ export async function POST(req: Request) {
       isAuthenticated,
       systemPrompt,
       agentId,
+      enableSearch,
     } = (await req.json()) as ChatRequest
 
     if (!messages || !chatId || !userId) {
@@ -41,26 +51,24 @@ export async function POST(req: Request) {
       )
     }
 
-    const supabase = await validateUserIdentity(userId, isAuthenticated)
-
-    await checkUsageByModel(supabase, userId, model, isAuthenticated)
+    const supabase = await validateAndTrackUsage({
+      userId,
+      model,
+      isAuthenticated,
+    })
 
     const userMessage = messages[messages.length - 1]
-    if (userMessage && userMessage.role === "user") {
-      const { error: msgError } = await supabase.from("messages").insert({
-        chat_id: chatId,
-        role: "user",
-        content: sanitizeUserInput(userMessage.content),
-        experimental_attachments:
-          userMessage.experimental_attachments as unknown as Attachment[],
-        user_id: userId,
+
+    if (supabase && userMessage?.role === "user") {
+      await logUserMessage({
+        supabase,
+        userId,
+        chatId,
+        content: userMessage.content,
+        attachments: userMessage.experimental_attachments as Attachment[],
+        model,
+        isAuthenticated,
       })
-      if (msgError) {
-        console.error("Error saving user message:", msgError)
-      } else {
-        console.log("User message saved successfully.")
-        await incrementUsageByModel(supabase, userId, model, isAuthenticated)
-      }
     }
 
     let agentConfig = null
@@ -69,83 +77,80 @@ export async function POST(req: Request) {
       agentConfig = await loadAgent(agentId)
     }
 
-    const modelConfig = MODELS_OPTIONS.find((m) => m.id === model)
+    const allModels = await getAllModels()
+    const modelConfig = allModels.find((m) => m.id === model)
 
-    if (!modelConfig) {
+    if (!modelConfig || !modelConfig.apiSdk) {
       throw new Error(`Model ${model} not found`)
     }
-    let modelInstance
-    if (modelConfig.provider === "openrouter") {
-      const openRouter = createOpenRouter({
-        apiKey: process.env.OPENROUTER_API_KEY,
-      })
-      modelInstance = openRouter.chat(modelConfig.api_sdk as string) // this is a special case for openrouter. Normal openrouter models are not supported.
-    } else {
-      modelInstance = modelConfig.api_sdk
-    }
 
-    let effectiveSystemPrompt =
+    const effectiveSystemPrompt =
       agentConfig?.systemPrompt || systemPrompt || SYSTEM_PROMPT_DEFAULT
 
     let toolsToUse = undefined
-    let effectiveMaxSteps = agentConfig?.maxSteps || 3
 
     if (agentConfig?.mcpConfig) {
       const { tools } = await loadMCPToolsFromURL(agentConfig.mcpConfig.server)
       toolsToUse = tools
     } else if (agentConfig?.tools) {
       toolsToUse = agentConfig.tools
-      await checkSpecialAgentUsage(supabase, userId)
-      await incrementSpecialAgentUsage(supabase, userId)
+      if (supabase) {
+        await trackSpecialAgentUsage(supabase, userId)
+      }
+    }
+
+    // Clean messages when switching between agents with different tool capabilities
+    const hasTools = !!toolsToUse && Object.keys(toolsToUse).length > 0
+    const cleanedMessages = cleanMessagesForTools(messages, hasTools)
+
+    let apiKey: string | undefined
+    if (isAuthenticated && userId) {
+      const { getEffectiveApiKey } = await import("@/lib/user-keys")
+      const provider = getProviderForModel(model)
+      apiKey =
+        (await getEffectiveApiKey(userId, provider as ProviderWithoutOllama)) ||
+        undefined
     }
 
     const result = streamText({
-      model: modelInstance as LanguageModelV1,
+      model: modelConfig.apiSdk(apiKey, { enableSearch }),
       system: effectiveSystemPrompt,
-      messages,
-      tools: toolsToUse,
-      maxSteps: effectiveMaxSteps,
-      onError: (err) => {
-        console.error("🛑 streamText error:", err)
+      messages: cleanedMessages,
+      tools: toolsToUse as ToolSet,
+      maxSteps: 10,
+      onError: (err: unknown) => {
+        console.error("Streaming error occurred:", err)
+        // Don't set streamError anymore - let the AI SDK handle it through the stream
       },
-      async onFinish({ response }) {
-        try {
-          await saveFinalAssistantMessage(supabase, chatId, response.messages)
-        } catch (err) {
-          console.error(
-            "Error in onFinish while saving assistant messages:",
-            err
-          )
+
+      onFinish: async ({ response }) => {
+        if (supabase) {
+          await storeAssistantMessage({
+            supabase,
+            chatId,
+            messages:
+              response.messages as unknown as import("@/app/types/api.types").Message[],
+          })
         }
       },
     })
 
-    // Ensure the stream is consumed so onFinish is triggered.
-    result.consumeStream()
-    const originalResponse = result.toDataStreamResponse({
+    return result.toDataStreamResponse({
       sendReasoning: true,
+      sendSources: true,
+      getErrorMessage: (error: unknown) => {
+        console.error("Error forwarded to client:", error)
+        return extractErrorMessage(error)
+      },
     })
-    // Optionally attach chatId in a custom header.
-    const headers = new Headers(originalResponse.headers)
-    headers.set("X-Chat-Id", chatId)
-
-    return new Response(originalResponse.body, {
-      status: originalResponse.status,
-      headers,
-    })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error in /api/chat:", err)
-    // Return a structured error response if the error is a UsageLimitError.
-    if (err.code === "DAILY_LIMIT_REACHED") {
-      return new Response(
-        JSON.stringify({ error: err.message, code: err.code }),
-        { status: 403 }
-      )
+    const error = err as {
+      code?: string
+      message?: string
+      statusCode?: number
     }
 
-    return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
-      { status: 500 }
-    )
+    return createErrorResponse(error)
   }
 }

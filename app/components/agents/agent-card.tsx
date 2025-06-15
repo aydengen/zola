@@ -1,9 +1,6 @@
-import { useUser } from "@/app/providers/user-provider"
-import { AgentSummary } from "@/app/types/agent"
 import { Tables } from "@/app/types/database.types"
 import { Avatar, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
-import { User } from "@phosphor-icons/react"
 
 type AgentCardProps = {
   id: string
@@ -14,7 +11,7 @@ type AgentCardProps = {
   isAvailable: boolean
   onClick?: () => void
   system_prompt?: string
-  tools?: string[]
+  tools?: string[] | null
   mcp_config?: Tables<"agents">["mcp_config"] | null
   isLight?: boolean
 }

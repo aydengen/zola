@@ -1,6 +1,8 @@
 "use client"
 
+import { PopoverContentAuth } from "@/app/components/chat-input/popover-content-auth"
 import { useBreakpoint } from "@/app/hooks/use-breakpoint"
+import { useKeyShortcut } from "@/app/hooks/use-key-shortcut"
 import { Button } from "@/components/ui/button"
 import {
   Drawer,
@@ -16,16 +18,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverTrigger } from "@/components/ui/popover"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { Model } from "@/lib/config"
-import { MODELS_FREE, MODELS_OPTIONS, MODELS_PRO } from "@/lib/config"
+import { FREE_MODELS_IDS } from "@/lib/config"
+import { useModel } from "@/lib/model-store/provider"
+import { ModelConfig } from "@/lib/models/types"
+import { PROVIDERS } from "@/lib/providers"
+import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
-import { CaretDown, MagnifyingGlass, Star } from "@phosphor-icons/react"
-import { useEffect, useRef, useState } from "react"
+import {
+  CaretDownIcon,
+  MagnifyingGlassIcon,
+  StarIcon,
+} from "@phosphor-icons/react"
+import { useRef, useState } from "react"
 import { ProModelDialog } from "./pro-dialog"
 import { SubMenu } from "./sub-menu"
 
@@ -33,15 +43,21 @@ type ModelSelectorProps = {
   selectedModelId: string
   setSelectedModelId: (modelId: string) => void
   className?: string
+  isUserAuthenticated?: boolean
 }
 
 export function ModelSelector({
   selectedModelId,
   setSelectedModelId,
   className,
+  isUserAuthenticated = true,
 }: ModelSelectorProps) {
-  const currentModel = MODELS_OPTIONS.find(
-    (model) => model.id === selectedModelId
+  const { models, isLoading: isLoadingModels } = useModel()
+  const { isModelHidden } = useUserPreferences()
+
+  const currentModel = models.find((model) => model.id === selectedModelId)
+  const currentProvider = PROVIDERS.find(
+    (provider) => provider.id === currentModel?.icon
   )
   const isMobile = useBreakpoint(768)
 
@@ -55,40 +71,18 @@ export function ModelSelector({
   // Ref for input to maintain focus
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // Add keyboard shortcut for ⌘⇧P to open model selector
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Using lowercase comparison to ensure it works regardless of case
-      if ((e.key === "p" || e.key === "P") && e.metaKey && e.shiftKey) {
-        e.preventDefault()
-        if (isMobile) {
-          setIsDrawerOpen((prev) => !prev)
-        } else {
-          setIsDropdownOpen((prev) => !prev)
-        }
-      }
+  useKeyShortcut(
+    (e) => (e.key === "p" || e.key === "P") && e.metaKey && e.shiftKey,
+    () => {
+      isMobile
+        ? setIsDrawerOpen((prev) => !prev)
+        : setIsDropdownOpen((prev) => !prev)
     }
+  )
 
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [isMobile])
-
-  // Close submenu when dropdown closes
-  useEffect(() => {
-    if (!isDropdownOpen) {
-      setHoveredModel(null)
-    }
-  }, [isDropdownOpen])
-
-  // This will show the submenu for the current model when the dropdown opens
-  useEffect(() => {
-    if (isDropdownOpen && selectedModelId) {
-      setHoveredModel(selectedModelId)
-    }
-  }, [isDropdownOpen, selectedModelId])
-
-  const renderModelItem = (model: Model) => {
-    const isPro = MODELS_PRO.some((proModel) => proModel.id === model.id)
+  const renderModelItem = (model: ModelConfig) => {
+    const isLocked = !model.accessible
+    const provider = PROVIDERS.find((provider) => provider.id === model.icon)
 
     return (
       <div
@@ -98,7 +92,7 @@ export function ModelSelector({
           selectedModelId === model.id && "bg-accent"
         )}
         onClick={() => {
-          if (isPro) {
+          if (isLocked) {
             setSelectedProModel(model.id)
             setIsProDialogOpen(true)
             return
@@ -113,15 +107,15 @@ export function ModelSelector({
         }}
       >
         <div className="flex items-center gap-3">
-          {model?.icon && <model.icon className="size-5" />}
+          {provider?.icon && <provider.icon className="size-5" />}
           <div className="flex flex-col gap-0">
             <span className="text-sm">{model.name}</span>
           </div>
         </div>
-        {isPro && (
+        {isLocked && (
           <div className="border-input bg-accent text-muted-foreground flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
-            <Star className="size-2" />
-            <span>Pro</span>
+            <StarIcon className="size-2" />
+            <span>Locked</span>
           </div>
         )}
       </div>
@@ -129,25 +123,34 @@ export function ModelSelector({
   }
 
   // Get the hovered model data
-  const hoveredModelData = MODELS_OPTIONS.find(
-    (model) => model.id === hoveredModel
-  )
+  const hoveredModelData = models.find((model) => model.id === hoveredModel)
 
-  const models = [...MODELS_FREE, ...MODELS_PRO] as Model[]
-  const filteredModels = models.filter((model) =>
-    model.name.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredModels = models
+    .filter((model) => !isModelHidden(model.id))
+    .filter((model) =>
+      model.name.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      const aIsFree = FREE_MODELS_IDS.includes(a.id)
+      const bIsFree = FREE_MODELS_IDS.includes(b.id)
+      return aIsFree === bIsFree ? 0 : aIsFree ? -1 : 1
+    })
+
+  if (isLoadingModels) {
+    return null
+  }
 
   const trigger = (
     <Button
       variant="outline"
       className={cn("dark:bg-secondary justify-between", className)}
+      disabled={isLoadingModels}
     >
       <div className="flex items-center gap-2">
-        {currentModel?.icon && <currentModel.icon className="size-5" />}
-        <span>{currentModel?.name}</span>
+        {currentProvider?.icon && <currentProvider.icon className="size-5" />}
+        <span>{currentModel?.name || "Select model"}</span>
       </div>
-      <CaretDown className="size-4 opacity-50" />
+      <CaretDownIcon className="size-4 opacity-50" />
     </Button>
   )
 
@@ -155,6 +158,37 @@ export function ModelSelector({
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
     setSearchQuery(e.target.value)
+  }
+
+  // If user is not authenticated, show the auth popover
+  if (!isUserAuthenticated) {
+    return (
+      <Popover>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                size="sm"
+                variant="secondary"
+                className={cn(
+                  "border-border dark:bg-secondary text-accent-foreground h-9 w-auto border bg-transparent",
+                  className
+                )}
+                type="button"
+              >
+                {currentProvider?.icon && (
+                  <currentProvider.icon className="size-5" />
+                )}
+                {currentModel?.name}
+                <CaretDownIcon className="size-4" />
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Select a model</TooltipContent>
+        </Tooltip>
+        <PopoverContentAuth />
+      </Popover>
+    )
   }
 
   if (isMobile) {
@@ -166,19 +200,14 @@ export function ModelSelector({
           currentModel={selectedProModel || ""}
         />
         <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
-          <DrawerTrigger asChild>
-            <Tooltip>
-              <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-              <TooltipContent>Switch model (⌘⇧M)</TooltipContent>
-            </Tooltip>
-          </DrawerTrigger>
+          <DrawerTrigger asChild>{trigger}</DrawerTrigger>
           <DrawerContent>
             <DrawerHeader>
               <DrawerTitle>Select Model</DrawerTitle>
             </DrawerHeader>
             <div className="px-4 pb-2">
               <div className="relative">
-                <MagnifyingGlass className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
+                <MagnifyingGlassIcon className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
                 <Input
                   ref={searchInputRef}
                   placeholder="Search models..."
@@ -189,8 +218,14 @@ export function ModelSelector({
                 />
               </div>
             </div>
-            <div className="flex h-full flex-col space-y-0.5 overflow-y-auto px-4 pb-6">
-              {filteredModels.length > 0 ? (
+            <div className="flex h-full flex-col space-y-0 overflow-y-auto px-4 pb-6">
+              {isLoadingModels ? (
+                <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+                  <p className="text-muted-foreground mb-2 text-sm">
+                    Loading models...
+                  </p>
+                </div>
+              ) : filteredModels.length > 0 ? (
                 filteredModels.map((model) => renderModelItem(model))
               ) : (
                 <div className="flex h-full flex-col items-center justify-center p-6 text-center">
@@ -229,6 +264,8 @@ export function ModelSelector({
             if (!open) {
               setHoveredModel(null)
               setSearchQuery("")
+            } else {
+              if (selectedModelId) setHoveredModel(selectedModelId)
             }
           }}
         >
@@ -237,19 +274,19 @@ export function ModelSelector({
           </TooltipTrigger>
           <TooltipContent>Switch model ⌘⇧P</TooltipContent>
           <DropdownMenuContent
-            className="flex h-[320px] w-[300px] flex-col space-y-0.5 overflow-visible px-0 pt-0"
+            className="flex h-[320px] w-[300px] flex-col space-y-0.5 overflow-visible p-0"
             align="start"
             sideOffset={4}
             forceMount
             side="top"
           >
-            <div className="bg-background sticky top-0 z-10 border-b px-0 pt-0 pb-0">
+            <div className="bg-background sticky top-0 z-10 rounded-t-md border-b px-0 pt-0 pb-0">
               <div className="relative">
-                <MagnifyingGlass className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
+                <MagnifyingGlassIcon className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
                 <Input
                   ref={searchInputRef}
                   placeholder="Search models..."
-                  className="border border-none pl-8 shadow-none focus-visible:ring-0"
+                  className="dark:bg-popover rounded-b-none border border-none pl-8 shadow-none focus-visible:ring-0"
                   value={searchQuery}
                   onChange={handleSearchChange}
                   onClick={(e) => e.stopPropagation()}
@@ -258,11 +295,18 @@ export function ModelSelector({
                 />
               </div>
             </div>
-            <div className="flex h-full flex-col space-y-0.5 overflow-y-auto px-1 pt-1 pb-0">
-              {filteredModels.length > 0 ? (
+            <div className="flex h-full flex-col space-y-0 overflow-y-auto px-1 pt-0 pb-0">
+              {isLoadingModels ? (
+                <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+                  <p className="text-muted-foreground mb-2 text-sm">
+                    Loading models...
+                  </p>
+                </div>
+              ) : filteredModels.length > 0 ? (
                 filteredModels.map((model) => {
-                  const isPro = MODELS_PRO.some(
-                    (proModel) => proModel.id === model.id
+                  const isLocked = !model.accessible
+                  const provider = PROVIDERS.find(
+                    (provider) => provider.id === model.icon
                   )
 
                   return (
@@ -272,8 +316,8 @@ export function ModelSelector({
                         "flex w-full items-center justify-between px-3 py-2",
                         selectedModelId === model.id && "bg-accent"
                       )}
-                      onSelect={(e) => {
-                        if (isPro) {
+                      onSelect={() => {
+                        if (isLocked) {
                           setSelectedProModel(model.id)
                           setIsProDialogOpen(true)
                           return
@@ -294,15 +338,14 @@ export function ModelSelector({
                       }}
                     >
                       <div className="flex items-center gap-3">
-                        {model?.icon && <model.icon className="size-5" />}
+                        {provider?.icon && <provider.icon className="size-5" />}
                         <div className="flex flex-col gap-0">
                           <span className="text-sm">{model.name}</span>
                         </div>
                       </div>
-                      {isPro && (
+                      {isLocked && (
                         <div className="border-input bg-accent text-muted-foreground flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
-                          <Star className="size-2" />
-                          <span>Pro</span>
+                          <span>Locked</span>
                         </div>
                       )}
                     </DropdownMenuItem>

@@ -3,9 +3,10 @@
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
 import { createClient } from "@/lib/supabase/client"
+import { isSupabaseEnabled } from "@/lib/supabase/config"
 import { CaretLeft, SealCheck, Spinner } from "@phosphor-icons/react"
 import { AnimatePresence, motion } from "motion/react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 const TRANSITION_CONTENT = {
   ease: "easeOut",
@@ -23,10 +24,9 @@ export function FeedbackForm({ authUserId, onClose }: FeedbackFormProps) {
   >("idle")
   const [feedback, setFeedback] = useState("")
 
-  useEffect(() => {
-    setStatus("idle")
-    setFeedback("")
-  }, [])
+  if (!isSupabaseEnabled) {
+    return null
+  }
 
   const handleClose = () => {
     setFeedback("")
@@ -49,6 +49,14 @@ export function FeedbackForm({ authUserId, onClose }: FeedbackFormProps) {
 
     try {
       const supabase = createClient()
+
+      if (!supabase) {
+        toast({
+          title: "Feedback is not supported in this deployment",
+          status: "info",
+        })
+        return
+      }
 
       const { error } = await supabase.from("feedback").insert({
         message: feedback,

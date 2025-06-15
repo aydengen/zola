@@ -1,3 +1,4 @@
+import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { UserProfile } from "@/app/types/user"
 import { toast } from "@/components/ui/toast"
 import { Message } from "@ai-sdk/react"
@@ -9,66 +10,23 @@ type UseChatHandlersProps = {
     messages: Message[] | ((messages: Message[]) => Message[])
   ) => void
   setInput: (input: string) => void
-  setSystemPrompt: (systemPrompt: string) => void
-  setSelectedModel: (model: string) => void
-  selectedModel: string
   chatId: string | null
-  updateChatModel: (chatId: string, model: string) => Promise<void>
-  user: UserProfile | null
 }
 
 export function useChatHandlers({
   messages,
   setMessages,
   setInput,
-  setSystemPrompt,
-  setSelectedModel,
-  selectedModel,
   chatId,
-  updateChatModel,
-  user,
 }: UseChatHandlersProps) {
+  const { setDraftValue } = useChatDraft(chatId)
+
   const handleInputChange = useCallback(
     (value: string) => {
       setInput(value)
+      setDraftValue(value)
     },
-    [setInput]
-  )
-
-  const handleSelectSystemPrompt = useCallback(
-    (newSystemPrompt: string) => {
-      setSystemPrompt(newSystemPrompt)
-    },
-    [setSystemPrompt]
-  )
-
-  const handleModelChange = useCallback(
-    async (model: string) => {
-      if (!user?.id) {
-        return
-      }
-
-      if (!chatId && user?.id) {
-        setSelectedModel(model)
-        return
-      }
-
-      const oldModel = selectedModel
-
-      setSelectedModel(model)
-
-      try {
-        await updateChatModel(chatId!, model)
-      } catch (err) {
-        console.error("Failed to update chat model:", err)
-        setSelectedModel(oldModel)
-        toast({
-          title: "Failed to update chat model",
-          status: "error",
-        })
-      }
-    },
-    [chatId, selectedModel, setSelectedModel, updateChatModel, user?.id]
+    [setInput, setDraftValue]
   )
 
   const handleDelete = useCallback(
@@ -91,8 +49,6 @@ export function useChatHandlers({
 
   return {
     handleInputChange,
-    handleSelectSystemPrompt,
-    handleModelChange,
     handleDelete,
     handleEdit,
   }

@@ -1,13 +1,22 @@
-"use client";
+"use client"
 
-import { useUser } from "@/app/providers/user-provider";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AppInfoTrigger } from "./app-info/app-info-trigger";
-import { FeedbackTrigger } from "./feedback/feedback-trigger";
-import { SettingsTrigger } from "./settings/settings-trigger";
-
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { useUser } from "@/lib/user-store/provider"
+import { AppInfoTrigger } from "./app-info/app-info-trigger"
+import { FeedbackTrigger } from "./feedback/feedback-trigger"
+import { SettingsTrigger } from "./settings/settings-trigger"
 
 export function UserMenu() {
   const { user } = useUser()
@@ -15,11 +24,12 @@ export function UserMenu() {
   if (!user) return null
 
   return (
-    <DropdownMenu>
+    // fix shadcn/ui / radix bug when dialog into dropdown menu
+    <DropdownMenu modal={false}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger>
-            <Avatar>
+            <Avatar className="bg-background hover:bg-muted">
               <AvatarImage src={user?.profile_image ?? undefined} />
               <AvatarFallback>{user?.display_name?.charAt(0)}</AvatarFallback>
             </Avatar>
